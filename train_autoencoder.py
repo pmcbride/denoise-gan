@@ -2,11 +2,13 @@ from argparse import ArgumentParser
 from dataloader import DataLoader
 from autoencoder import Autoencoder
 import os
+import glob
 import numpy as np
 from datetime import datetime
 import tensorflow as tf
 
 os.environ['CUDA_VISIBLE_DEVICES'] = "1"
+os.environ['TF_CPP_MIN_LOG_LEVEL']= "2"
 
 tf.config.set_soft_device_placement(True)
 # tf.debugging.set_log_device_placement(True)
@@ -29,7 +31,11 @@ parser.add_argument('--epochs', default=1, type=int, help='Number of epochs for 
 parser.add_argument('--crop_size', default=256, type=int, help='Low resolution input size.')
 parser.add_argument('--lr', default=1e-3, type=float, help='Learning rate for optimizers.')
 parser.add_argument('--save_iter', default=200, type=int, help='The number of iterations to save the tensorboard summaries and models.')
+parser.add_argument('--model_dir', default="./models", type=str, help='Model directory if different from ./models/autoencoder.h5.')
+parser.add_argument('--logdir', default="./logs", type=str, help='Tensorboard logdir.')
 parser.add_argument('--retrain_model', default=False, type=bool, help='True for retraining current model in models/autoencoder.h5.')
+parser.add_argument('--save_model', default=True, type=bool, help='Save model during iterations.')
+
 
 
 
@@ -47,7 +53,7 @@ def train_step(model, x, y):
     content_loss = model.content_loss(y, fake_hr)
     mse_loss = tf.keras.losses.MeanSquaredError()(y, fake_hr)
     total_loss = content_loss + mse_loss
-  
+
   grads = tape.gradient(total_loss, model.autoencoder.trainable_variables)
   model.optimizer.apply_gradients(zip(grads, model.autoencoder.trainable_variables))
 
@@ -80,6 +86,8 @@ def train(model, dataset, args, writer):
         writer.flush()
       model.iterations += 1
 
+def get_path(path):
+  return os.path.expanduser(os.path.expandvars(path))
 
 def main():
   # Parse the CLI arguments.
@@ -90,12 +98,21 @@ def main():
     os.makedirs('models/checkpoints')
 
   # Create the tensorflow dataset.
+  # image_dir = get_path(args.image_dir)
   ds = DataLoader(args.image_dir, args.crop_size).dataset(args.batch_size)
 
   # Define the directory for saving the SRGAN training tensorbaord summary.
-  train_summary_writer = tf.summary.create_file_writer('logs/train7')
+  logdir = get_path(args.logdir)
+  traindirs = glob.glob(os.path.join(logdir,"train_*"))
+  if traindirs:
+    train_num = int(max([x.split('_')[-1] for x in traindirs]))
+    train_num += 1
+  else:
+    train_num = 1
+  traindir = os.path.join(logdir, f"train_{train_num}")
+  train_summary_writer = tf.summary.create_file_writer(traindir)
 
-  # tf.summary.trace_on(graph=True, profiler=False)
+  tf.summary.trace_on(graph=True, profiler=False)
   model = Autoencoder(args)
   # with train_summary_writer.as_default():
   #   tf.summary.trace_export("Autoencoder", step=0)
@@ -105,14 +122,19 @@ def main():
   for epoch in range(args.epochs):
     print("====== Beginning epoch {} ======".format(epoch))
     train(model, ds, args, train_summary_writer)
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    model.autoencoder.save(f"models/checkpoints/autoencoder_ckpt_{epoch}_{timestamp}.h5")
+    with train_summary_writer.as_default():
+      tf.summary.trace_export("Autoencoder", step=0)
+      train_summary_writer.flush()
+    if args.save_model:
+      timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+      model.autoencoder.save(f"models/checkpoints/autoencoder_ckpt_{epoch}_{timestamp}.h5")
     print("====== Finished epoch {} ======".format(epoch))
 
   # Save final models
-  timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-  model.autoencoder.save("models/autoencoder.h5")
-  model.autoencoder.save(f"models/checkpoints/autoencoder_{timestamp}.h5")
+  if args.save_model:
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    model.autoencoder.save("models/autoencoder.h5")
+    model.autoencoder.save(f"models/checkpoints/autoencoder_{timestamp}.h5")
 
 if __name__ == '__main__':
   main()
