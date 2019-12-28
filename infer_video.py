@@ -5,7 +5,7 @@ import numpy as np
 import cv2
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL']= '3'
-os.environ['CUDA_VISIBLE_DEVICES'] = "0,1"
+os.environ['CUDA_VISIBLE_DEVICES'] = "1"
 
 tf.config.set_soft_device_placement(True)
 # tf.debugging.set_log_device_placement(True)
@@ -96,7 +96,7 @@ def process_video():
 
 def main():
   args = parser.parse_args()
-  scale = 4
+  scale = 1
   scale2 = 1
 
   # Get all image paths
@@ -116,7 +116,7 @@ def main():
   is_color = True
 
   # Set new variables
-  fourcc = cv2.VideoWriter_fourcc('R','G','B','A')
+  # fourcc = cv2.VideoWriter_fourcc('R','G','B','A')
   # fps = 25.0
   # frame_start = 800
   
@@ -154,9 +154,11 @@ def main():
 
     # Rescale values in range 0-255
     frame_sr = ((frame_sr + 1) / 2.) * 255
+    low_res = low_res * 255
 
     # Convert back to BGR for opencv
     frame_sr = cv2.cvtColor(frame_sr, cv2.COLOR_RGB2BGR).astype(np.uint8)
+    # low_res = cv2.cvtColor(low_res, cv2.COLOR_RGB2BGR).astype(np.uint8)
     # print("  Converting back to uint8")
     # print(f"  frame type: {type(frame_sr)}, dtype: {frame_sr.dtype}, shape: {frame_sr.shape}")
     if size[0] != frame_sr.shape[1] and size[1] != frame_sr.shape[0]:
@@ -167,11 +169,11 @@ def main():
     # cv2.imshow("Incoming frame", low_res)
 
     # Display outgoing frame
-    # cv2.imshow("Outgoing frame", frame_sr)
+    cv2.imshow("Outgoing frame", frame_sr)
 
-    # if cv2.waitKey(1) & 0xFF == ord('q'):
-    #   out.write(frame_sr)
-    #   break
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+      out.write(frame_sr)
+      break
 
     out.write(frame_sr)
 

@@ -3,6 +3,7 @@ from argparse import ArgumentParser
 import numpy as np
 import cv2
 import os
+import glob
 import tensorflow as tf
 os.environ['TF_CPP_MIN_LOG_LEVEL']= '3'
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
@@ -32,6 +33,9 @@ def denoise(img, dst=None, h=10, hColor=10, templateWindowSize=7, searchWindowSi
   # Default kwargs: dst=None, h=10, hColor=10, templateWindowSize=7, searchWindowSize=21
   return cv2.fastNlMeansDenoisingColored(img, dst, h, hColor, templateWindowSize, searchWindowSize)
 
+def get_path(path):
+  return os.path.expanduser(os.path.expandvars(path))
+
 def main():
     args = parser.parse_args()
     debug = args.debug
@@ -40,7 +44,8 @@ def main():
     # Get all image paths
     image_dir = os.path.expanduser(os.path.expandvars(args.image_dir))
     output_dir = os.path.expanduser(os.path.expandvars(args.output_dir))
-    image_paths = [os.path.join(image_dir, x) for x in sorted(os.listdir(image_dir))]
+    # image_paths = [os.path.join(image_dir, x) for x in sorted(os.listdir(image_dir))]
+    image_paths = sorted(glob.glob(os.path.join(image_dir, "*.png")))
 
     # Change model input shape to accept all size inputs
     model_path = os.path.expanduser(os.path.expandvars(args.model))
@@ -53,7 +58,7 @@ def main():
     for image_path in image_paths:
 
         # Read image
-        low_res = cv2.imread(image_path, 1)
+        low_res = cv2.imread(image_path, cv2.IMREAD_COLOR)
 
         # Convert to RGB (opencv uses BGR as default)
         low_res = cv2.cvtColor(low_res, cv2.COLOR_BGR2RGB)

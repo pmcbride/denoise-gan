@@ -112,7 +112,7 @@ class DataLoader(object):
             high_res: the tf tensor of the high res image, rescaled.
         """
 
-        low_res = tf.image.adjust_jpeg_quality(low_res, jpeg_quality=25)
+        low_res = tf.image.adjust_jpeg_quality(low_res, jpeg_quality=50)
 
         return low_res, high_res
 
