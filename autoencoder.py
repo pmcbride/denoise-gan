@@ -20,7 +20,7 @@ class Autoencoder(object):
     self.hr_shape = (self.hr_height, self.hr_width, 3)
     self.iterations = 0
     self.epochs = 0
-    self.retrain = bool(args.retrain_model)
+    self.retrain = bool(args.retrain)
 
     # Define a learning rate decay schedule.
     self.ae_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
@@ -38,7 +38,7 @@ class Autoencoder(object):
     )
 
     # Define Optimzer
-    self.ae_optimizer = tf.keras.optimizers.Adam(learning_rate=self.ae_schedule)
+    self.gen_optimizer = tf.keras.optimizers.Adam(learning_rate=self.ae_schedule)
     self.disc_optimizer = tf.keras.optimizers.Adam(learning_rate=self.disc_schedule)
 
     # We use a pre-trained VGG19 model to extract image features from the high resolution
@@ -55,7 +55,7 @@ class Autoencoder(object):
     self.df = 32
 
     # Build and compile the autoencoder
-    self.autoencoder = self.build_autoencoder()
+    self.generator = self.build_autoencoder()
 
     # Build and compile the discriminator
     self.discriminator = self.build_discriminator()
@@ -206,8 +206,8 @@ class Autoencoder(object):
 
     # Build Discriminator Model
     if self.retrain == True:
-      print("Loading model from models/discriminator.h5")
-      model = tf.keras.models.load_model("models/discriminator.h5")
+      print("Loading model from models/discriminator_ae.h5")
+      model = tf.keras.models.load_model("models/discriminator_ae.h5")
       img_in = tf.keras.layers.Input(shape=self.hr_shape)
       validity = model(img_in)
       return tf.keras.models.Model(img_in, validity)

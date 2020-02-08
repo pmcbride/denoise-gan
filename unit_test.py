@@ -23,11 +23,11 @@ if gpus:
     print(e)
 
 parser = ArgumentParser()
-parser.add_argument('--image_dir', default="./test", type=str, help='Directory where images are kept.')
-parser.add_argument('--output_dir', default="./test", type=str, help='Directory where to output high res images.')
-parser.add_argument('--model', default="./models/autoencoder.h5", type=str, help='Path to model to use for inference.')
+parser.add_argument('--image_dir', default="test/images", type=str, help='Directory where images are kept.')
+parser.add_argument('--output_dir', default="test/images", type=str, help='Directory where to output high res images.')
+parser.add_argument('--model', default="models/autoencoder.h5", type=str, help='Path to model to use for inference.')
 parser.add_argument('--debug', default=False, type=bool, help='Show debug printing.')
-parser.add_argument('--logdir', default="./test/logs", type=str, help='Tensorboard logdir.')
+parser.add_argument('--logdir', default="test/logs", type=str, help='Tensorboard logdir.')
 
 def denoise(img, dst=None, h=10, hColor=10, templateWindowSize=7, searchWindowSize=21):
   # Default kwargs: dst=None, h=10, hColor=10, templateWindowSize=7, searchWindowSize=21
@@ -35,6 +35,12 @@ def denoise(img, dst=None, h=10, hColor=10, templateWindowSize=7, searchWindowSi
 
 def get_path(path):
   return os.path.expanduser(os.path.expandvars(path))
+
+def rename(img_path, suffix):
+  print(img_path)
+  img_prefix, img_format = img_path.split('.')
+  print(img_path, img_prefix, img_format)
+  return img_prefix + "_" + suffix + "." + img_format
 
 def main():
     args = parser.parse_args()
@@ -51,14 +57,14 @@ def main():
     model_path = os.path.expanduser(os.path.expandvars(args.model))
     model = tf.keras.models.load_model(model_path)
     inputs = tf.keras.Input((None, None, 3))
-    output = model(inputs)
+    output = model(inputs, training=False)
     model = tf.keras.models.Model(inputs, output)
 
     # Loop over all images
     for image_path in image_paths:
 
         # Read image
-        low_res = cv2.imread(image_path, cv2.IMREAD_COLOR)
+        low_res = cv2.imread(image_path, cv2.IMREAD_COLOR)[:256,:256,:]
 
         # Convert to RGB (opencv uses BGR as default)
         low_res = cv2.cvtColor(low_res, cv2.COLOR_BGR2RGB)
@@ -70,7 +76,7 @@ def main():
         if debug:
           print("  Performing Inference")
           print(f"  frame type: {type(low_res)}, dtype: {low_res.dtype}, shape: {low_res.shape}\n")
-        sr = model.predict(np.expand_dims(low_res, axis=0))[0]
+        sr = model(np.expand_dims(low_res, axis=0), training=False)[0]
         if debug:
           print("  Inference Complete")
           print(f"  frame type: {type(sr)}, dtype: {sr.dtype}, shape: {sr.shape}\n")
@@ -94,23 +100,26 @@ def main():
           print(f"  low_res frame type: {type(low_res)}, dtype: {low_res.dtype}, shape: {low_res.shape}")
 
         # Display input frame
-        cv2.namedWindow("Input frame", cv2.WINDOW_NORMAL)
-        cv2.imshow("Input frame", low_res)
+        #cv2.namedWindow("Input frame", cv2.WINDOW_NORMAL)
+        #cv2.imshow("Input frame", low_res)
 
         # Display output frame
-        cv2.namedWindow("LR Denoise", cv2.WINDOW_NORMAL)
-        cv2.imshow("LR Denoise", lr_denoise)
+        #cv2.namedWindow("LR Denoise", cv2.WINDOW_NORMAL)
+        #cv2.imshow("LR Denoise", lr_denoise)
+        #cv2.imwrite(rename(image_path, "sr"), sr)
 
         # Display output frame
-        cv2.namedWindow("Output frame", cv2.WINDOW_NORMAL)
-        cv2.imshow("Output frame", sr)
+        #cv2.namedWindow("Output frame", cv2.WINDOW_NORMAL)
+        #cv2.imshow("Output frame", sr)
+        cv2.imwrite(rename(image_path, "sr"), sr)
 
         # Display output frame opencv denoise
-        cv2.namedWindow("SR Denoise", cv2.WINDOW_NORMAL)
-        cv2.imshow("SR Denoise", sr_denoise)
+        #cv2.namedWindow("SR Denoise", cv2.WINDOW_NORMAL)
+        #cv2.imshow("SR Denoise", sr_denoise)
+        cv2.imwrite(rename(image_path, "sr_denoise"), sr_denoise)
 
-        cv2.waitKey(0) #& 0xFF == ord('q'):
-        cv2.destroyAllWindows()
+        #cv2.waitKey(0) #& 0xFF == ord('q'):
+        #cv2.destroyAllWindows()
 
 
 if __name__ == '__main__':

@@ -4,61 +4,19 @@ from tensorflow import keras
 import numpy as np
 import cv2
 import os
-os.environ['TF_CPP_MIN_LOG_LEVEL']= '3'
+
 os.environ['CUDA_VISIBLE_DEVICES'] = "1"
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = "2"
 
 tf.config.set_soft_device_placement(True)
 # tf.debugging.set_log_device_placement(True)
 gpus = tf.config.experimental.list_physical_devices('GPU')
-if gpus:
-  try:
-  # Currently, memory growth needs to be the same across GPUs
-    for gpu in gpus:
-      tf.config.experimental.set_memory_growth(gpu, True)
-    logical_gpus = tf.config.experimental.list_logical_devices('GPU')
-    print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
-  except RuntimeError as e:
-    # Memory growth must be set before GPUs have been initialized
-    print(e)
+# Currently, memory growth needs to be the same across GPUs
+for gpu in gpus:
+  tf.config.experimental.set_memory_growth(gpu, True)
+logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
 
-parser = ArgumentParser()
-parser.add_argument('--input_video', type=str, help='Path to input video')
-parser.add_argument('--output_video', type=str, help='Path to output high res video.')
-parser.add_argument('--model', default="./models/autoencoder.h5", type=str, help='Path to model.')
-
-
-def make_video(outvid, images=None, fps=30, size=None,
-         is_color=True, format="FMP4"):
-  """
-  Create a video from a list of images.
- 
-  @param    outvid    output video
-  @param    images    list of images to use in the video
-  @param    fps     frame per second
-  @param    size    size of each frame
-  @param    is_color  color
-  @param    format    see http://www.fourcc.org/codecs.php
-  @return         see http://opencv-python-tutroals.readthedocs.org/en/latest/py_tutorials/py_gui/py_video_display/py_video_display.html
- 
-  The function relies on http://opencv-python-tutroals.readthedocs.org/en/latest/.
-  By default, the video will have the size of the first image.
-  It will resize every image to this size before adding them to the video.
-  """
-  fourcc = cv2.VideoWriter_fourcc(*format)
-  vid = None
-  for image in images:
-    if not os.path.exists(image):
-      raise FileNotFoundError(image)
-    img = cv2.imread(image)
-    if vid is None:
-      if size is None:
-        size = img.shape[1], img.shape[0]
-      vid = cv2.VideoWriter(outvid, fourcc, float(fps), size, is_color)
-    if size[0] != img.shape[1] and size[1] != img.shape[0]:
-      img = cv2.resize(img, size)
-    vid.write(img)
-  vid.release()
-  return vid
 
 def decode_fourcc(fourcc, debug=False):
   """ Decodes fourcc value
@@ -86,100 +44,158 @@ def get_video_info(video_path):
   print("frames: {}, fps: {}, width: {}, height: {}, fourcc_dec/fourcc: {}/{}".format(num_frames, fps, frame_width, frame_height, fourcc_dec, fourcc))
   return num_frames, fps, frame_width, frame_height, fourcc
 
-def process_video():
-  cap = cv2.VideoCapture("input_file.mp4")
-  out = cv2.VideoWriter("output_file.avi", ...)
-  while (cap.isOpened()):
-    ret, frame = cap.read()
-    # ... DO SOME STUFF TO frame... #
-    out.write(frame)
+def im2patch(img, crop=256):
+  shape = img.shape
+  return tf.reshape(tf.nn.space_to_depth(img, crop), [-1, crop, crop, shape[-1]])
+  
+def patch2im(imgs, patch_shape=[4,4]):
+  shape = imgs.shape
+  h = patch_shape[0] * shape[1]
+  w = patch_shape[1] * shape[2]
+  return tf.nn.depth_to_space(tf.reshape(imgs, [1, patch_shape[0], patch_shape[1], -1]), shape[1])
 
-def main():
-  args = parser.parse_args()
-  scale = 1
-  scale2 = 1
+def laplacian(image):
+  if tf.is_tensor(image):
+    image = image.numpy()
+  shape = image.shape
+  if shape[0]==1:
+    image = np.squeeze(image, axis=0)
+  return np.reshape(cv2.Laplacian(image, cv2.CV_32F), shape)
 
+def get_path(path):
+  return os.path.realpath(os.path.expanduser(os.path.expandvars(path)))
+
+def main(args):
   # Get all image paths
-  input_video_path = os.path.expanduser(os.path.expandvars(args.input_video))
-  output_video_path = os.path.expanduser(os.path.expandvars(args.output_video))
-
-  # Change model input shape to accept all size inputs
-  model_path = os.path.expanduser(os.path.expandvars(args.model))
-  model = keras.models.load_model(model_path)
-  inputs = keras.Input((None, None, 3))
-  output = model(inputs)
-  model = keras.models.Model(inputs, output)
+  input_video_path = get_path(args.input_video)
+  output_video_path = get_path(args.output_video)
+  
+  scale = 4
 
   # Get video info
-  num_frames, fps, frame_width, frame_height, fourcc = get_video_info(input_video_path)
-  size = frame_width * scale * scale2, frame_height * scale * scale2
+  # num_frames, fps, frame_width, frame_height, fourcc_code
+  num_frames, fps, fw, fh, fourcc = get_video_info(input_video_path)
+  model_scale = 1
+  crop = 256
+  new_h = (fh + 256 * model_scale) - fh % (256 * model_scale)
+  # new_h = (fh) - fh % (256 * model_scale)
+  new_w = (fw + 256 * model_scale) - fw % (256 * model_scale)
+  # new_w = (fw) - fw % (256 * model_scale)
+  resize_h = new_h // model_scale
+  resize_w = new_w // model_scale
+  size = new_w * scale, new_h * scale
+  print(f"org size: {(fh, fw)}")
+  print(f"new size: {(new_h, new_w)}")
+  print(f"size: {size}")
   is_color = True
+
+  # Change model input shape to accept all size inputs
+  model_path = get_path(args.model)
+  model = keras.models.load_model(model_path)
+  inputs = keras.Input((None, None, 3))
+  outputs = model(inputs, training=False)
+  model = keras.Model(inputs, outputs)
+  
+  # Create Checkpoint
+  # ckpt_dir = get_path('models/checkpoints/fsrgan')
+  # # os.makedirs(ckpt_dir, exist_ok=True)
+  # ckpt = tf.train.Checkpoint(generator=generator,
+  #                            discriminator=discriminator)
+  # ckpt_manager = tf.train.CheckpointManager(ckpt, ckpt_dir, max_to_keep=3)
+  # if bool(args.retrain) == True:
+  #   ckpt.restore(ckpt_manager.latest_checkpoint).expect_partial()
+
+  def set_frame(cap, frame):
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame)
 
   # Set new variables
   # fourcc = cv2.VideoWriter_fourcc('R','G','B','A')
   # fps = 25.0
-  # frame_start = 800
-  
+  frame_start = 1600
+
   # Open video capture
   cap = cv2.VideoCapture(input_video_path)
   # cap.set(cv2.CAP_PROP_FPS, fps)
-  cap.set(cv2.CAP_PROP_FOURCC, fourcc)
+  # cap.set(cv2.CAP_PROP_FOURCC, fourcc)
   # cap.set(cv2.CAP_PROP_POS_FRAMES, frame_start)
+  set_frame(cap, frame_start)
+  #size = [256, 256]
 
-  out = cv2.VideoWriter(output_video_path, fourcc, fps, size, is_color)
+  # out = cv2.VideoWriter(output_video_path, fourcc, fps, size, is_color)
 
   while (cap.isOpened()):
     frame_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
     print("Reading frame: {}/{}".format(frame_pos, num_frames))
     ret, frame = cap.read()
-    if not ret: 
+    if not ret:
       break
 
     ## Preprocess Image and Run Inference
 
     # Convert to RGB (opencv uses BGR as default)
-    # print("  Color conversion:")
-    # print(f"  frame type: {type(frame)}, dtype: {frame.dtype}, shape: {frame.shape}")
-    low_res = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    # low_res = cv2.resize(low_res, (frame_width*scale2, frame_height*scale2))
-    # Rescale to 0-1.
-    low_res = low_res / 255.0
+    # cv2.imwrite(f"video_out/frame_{frame_pos}.jpg", frame)
+
+    frame_in = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    frame_in = tf.image.convert_image_dtype(frame_in, 'float32')
+    frame_in = tf.image.resize_with_crop_or_pad(frame_in, new_h, new_w)
+    # frame_in = cv2.resize(frame_in, (new_w // model_scale, new_h // model_scale), cv2.INTER_AREA)
+    # frame_in = tf.image.resize(frame_in, [resize_h, resize_w], method='bicubic', preserve_aspect_ratio=True, antialias=True)
+    frame_in = frame_in * 2 - 1
 
     # Get super resolution image
-    # print("  Performing Inference")
-    # print(f"  frame type: {type(low_res)}, dtype: {low_res.dtype}, shape: {low_res.shape}")
-    frame_sr = model.predict(np.expand_dims(low_res, axis=0))[0]
-    # print("  Inference Complete")
-    # print(f"  frame type: {type(frame_sr)}, dtype: {frame_sr.dtype}, shape: {frame_sr.shape}")
-
+    frame_out = model(frame_in[tf.newaxis, ...], training=False)[0].numpy()
+    # frame_out = model(im2patch(frame_in[tf.newaxis, ...], crop), training=False)
+    # frame_out = patch2im(frame_out, patch_shape=[resize_h//crop, resize_w//crop])[0].numpy()
+    frame_out = frame_out * 0.5 + 0.5
     # Rescale values in range 0-255
-    frame_sr = ((frame_sr + 1) / 2.) * 255
-    low_res = low_res * 255
+    # frame_out = tf.image.convert_image_dtype(frame_out * 0.5 + 0.5, 'uint8')
+    # frame_out = frame_out.astype(np.uint8)
+    # frame_out = cv2.resize(frame_out, (new_w, new_h), cv2.INTER_CUBIC)
+    # frame_out = tf.image.resize(frame_out, [new_h, new_w], method='bicubic', preserve_aspect_ratio=True, antialias=True)
+    # frame_out = frame_out.numpy()
+    frame_out = tf.clip_by_value(tf.image.resize_with_crop_or_pad(frame_out, fh*scale, fw*scale), 0, 1).numpy()
+    # frame_lap = tf.image.convert_image_dtype(tf.clip_by_value(frame_out - laplacian(frame_out), 0, 1), 'uint8').numpy()
+    frame_out = frame_out * 255
+    frame_out = frame_out.astype(np.uint8)
 
+    frame_in = frame_in * 0.5 + 0.5
+    frame_in = tf.image.resize_with_crop_or_pad(frame_in, fh, fw).numpy()
+    frame_in = cv2.resize(frame_in, (fw*4, fh*4), cv2.INTER_CUBIC)
+    frame_in = frame_in * 255
+    frame_in = frame_in.astype(np.uint8)
     # Convert back to BGR for opencv
-    frame_sr = cv2.cvtColor(frame_sr, cv2.COLOR_RGB2BGR).astype(np.uint8)
-    # low_res = cv2.cvtColor(low_res, cv2.COLOR_RGB2BGR).astype(np.uint8)
-    # print("  Converting back to uint8")
-    # print(f"  frame type: {type(frame_sr)}, dtype: {frame_sr.dtype}, shape: {frame_sr.shape}")
-    if size[0] != frame_sr.shape[1] and size[1] != frame_sr.shape[0]:
-      # print("Frame size does not match intial size of '{}'".format(size))
-      frame_sr = cv2.resize(frame_sr, size)
+    frame_out = cv2.cvtColor(frame_out, cv2.COLOR_RGB2BGR)
+    # frame_lap = cv2.cvtColor(frame_lap, cv2.COLOR_RGB2BGR)
+    frame_in = cv2.cvtColor(frame_in, cv2.COLOR_RGB2BGR)
+    # if size[0] != frame_out.shape[1] and size[1] != frame_out.shape[0]:
+      # frame_out = cv2.resize(frame_out, size)
 
     # Display outgoing frame
-    # cv2.imshow("Incoming frame", low_res)
+    cv2.imshow("Incoming frame", frame_in)
 
     # Display outgoing frame
-    cv2.imshow("Outgoing frame", frame_sr)
+    cv2.imshow("Outgoing frame", frame_out)
+    # cv2.imshow("Outgoing laplacian", frame_lap)
+
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
-      out.write(frame_sr)
+      # out.write(frame_out)
       break
 
-    out.write(frame_sr)
+    # out.write(frame_out)
 
   cap.release()
-  out.release()
+  # out.release()
   cv2.destroyAllWindows()
 
 if __name__ == '__main__':
-  main()
+  pix2pix = "./saved_models/pix2pix_jpeg_0105.h5"
+  fsrgan = "./saved_models/fsrgan_0114_0227.h5"
+  autoencoder = "./saved_models/autoencoder_jpeg_mse_0110.h5"
+
+  parser = ArgumentParser()
+  parser.add_argument('--input_video', default="./video_in/8minanal_240P.mp4", type=str, help='Path to input video')
+  parser.add_argument('--output_video', default="./video_out/out.mp4", type=str, help='Path to output high res video.')
+  parser.add_argument('--model', default=fsrgan, type=str, help='Path to model.')
+  args = parser.parse_args()
+  main(args)
