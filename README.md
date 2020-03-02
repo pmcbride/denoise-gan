@@ -1,2 +1,2 @@
-# denoise-autoencoder
-Denoising Autoencoder based on Nvidia ray-tracing denoiser
+# denoise-gan
+Image denoising model produced using tensorflow and GAN based training model.
