@@ -194,7 +194,7 @@ if __name__ == '__main__':
   autoencoder = "./saved_models/autoencoder_jpeg_mse_0110.h5"
 
   parser = ArgumentParser()
-  parser.add_argument('--input_video', default="./video_in/8minanal_240P.mp4", type=str, help='Path to input video')
+  parser.add_argument('--input_video', default="./video_in/in.mp4", type=str, help='Path to input video')
   parser.add_argument('--output_video', default="./video_out/out.mp4", type=str, help='Path to output high res video.')
   parser.add_argument('--model', default=fsrgan, type=str, help='Path to model.')
   args = parser.parse_args()
